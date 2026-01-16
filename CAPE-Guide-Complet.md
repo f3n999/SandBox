@@ -468,5 +468,3 @@ async def quick_check(file_data: bytes, filename: str):
 - [ ] Orchestrateur connecté à CAPE
 
 ---
-
-**Fait avec ❤️ par Oteria B3 Security**
