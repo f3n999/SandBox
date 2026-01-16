@@ -1,6 +1,6 @@
-# 🛡️ GUIDE COMPLET : CAPE V2 Pour Défense Anti-Ransomware
+#  GUIDE COMPLET : CAPE V2 Pour Défense Anti-Ransomware
 
-## 📖 Table des matières
+##  Table des matières
 
 1. [Introduction & Concepts](#introduction)
 2. [Architecture CAPE](#architecture)
@@ -15,7 +15,7 @@
 
 ---
 
-## 🎯 Introduction & Concepts
+##  Introduction & Concepts
 
 ### Qu'est-ce que CAPE V2 ?
 
@@ -42,7 +42,7 @@ C'est un **sandbox malware** sophistiqué qui :
 
 ---
 
-## 🏗️ Architecture CAPE
+##  Architecture CAPE
 
 ### Composants clés
 
@@ -77,11 +77,11 @@ C'est un **sandbox malware** sophistiqué qui :
 
 ---
 
-## 📦 Installation Complète
+##  Installation Complète
 
 ### Prérequis matériel
 
-✅ Recommandé pour 3 VM:
+ Recommandé pour 3 VM:
 - CPU: 8+ cores (Intel VT-x ou AMD-V)
 - RAM: 32GB+ (16GB par VM)
 - Disque: 500GB+ SSD
@@ -131,7 +131,7 @@ python3 manage.py createsuperuser
 
 ---
 
-## ⚙️ Configuration clés
+##  Configuration clés
 
 ### cape.conf - Configuration maître
 
@@ -154,7 +154,7 @@ extract_config = yes
 
 ---
 
-## 🚀 Utilisation Pratique
+##  Utilisation Pratique
 
 ### API REST - Soumettre une analyse
 
@@ -195,7 +195,7 @@ async def get_verdict(task_id):
 
 ---
 
-## 🔗 Intégration Orchestrateur
+##  Intégration Orchestrateur
 
 ### CAPE Client pour ton API
 
@@ -338,7 +338,7 @@ async def analyze_with_cape(file_data: bytes) -> Dict:
 
 ---
 
-## 🎯 YARA Signatures
+##  YARA Signatures
 
 ### Ransomware Behavior Signatures
 
@@ -430,7 +430,7 @@ sudo systemctl restart postgresql
 
 ---
 
-## ⚡ Optimisations Performance
+##  Optimisations Performance
 
 ### 1. Parallel Analysis
 
@@ -453,7 +453,7 @@ async def quick_check(file_data: bytes, filename: str):
 
 ---
 
-## 📋 Checklist Déploiement
+##  Checklist Déploiement
 
 - [ ] Host Ubuntu 24.04 configuré
 - [ ] KVM/QEMU installé et testé
