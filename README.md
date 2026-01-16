@@ -1,11 +1,11 @@
-# 🛡️ Défense Anti-Ransomware pour les Établissements de Santé
+#  Défense Anti-Ransomware pour les Établissements de Santé
 
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.10+-green.svg)
 ![Docker](https://img.shields.io/badge/docker-ready-blue.svg)
 ![Status](https://img.shields.io/badge/status-in%20development-orange.svg)
 
-## 📋 Description
+##  Description
 
 Architecture complète de sécurité email open source basée sur Docker, combinant :
 - **Filtrage statique** (Rspamd, ClamAV)
@@ -16,7 +16,7 @@ Conçu pour protéger les données critiques de santé **sans surcoût de licenc
 
 ---
 
-## 🎯 Objectifs du Projet
+##  Objectifs du Projet
 
 | # | Objectif | Status |
 |---|----------|--------|
@@ -29,7 +29,7 @@ Conçu pour protéger les données critiques de santé **sans surcoût de licenc
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -65,7 +65,7 @@ Conçu pour protéger les données critiques de santé **sans surcoût de licenc
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prérequis
 
@@ -101,7 +101,7 @@ docker-compose ps
 
 ---
 
-## 📂 Structure du Projet
+##  Structure du Projet
 
 ```
 SandBox/
@@ -163,7 +163,7 @@ SandBox/
 
 ---
 
-## 🔧 Configuration
+##  Configuration
 
 ### Variables d'environnement (.env)
 
@@ -198,7 +198,7 @@ LOG_RETENTION_DAYS=90
 
 ---
 
-## 🧪 Tests
+##  Tests
 
 ```bash
 # Tests unitaires
@@ -217,7 +217,7 @@ pytest tests/e2e/ -v
 
 ---
 
-## 📊 API Documentation
+##  API Documentation
 
 Une fois l'orchestrateur lancé, accède à la documentation interactive :
 
@@ -236,72 +236,59 @@ Une fois l'orchestrateur lancé, accède à la documentation interactive :
 
 ---
 
-## 🛡️ Sécurité
+##  Sécurité
 
-- ✅ **Zéro donnée patient hors-premise** (100% on-premise)
-- ✅ **Logs chiffrés AES256**
-- ✅ **Rétention 90 jours** avec purge automatique
-- ✅ **RGPD by design**
-- ✅ **Loi Ségur conforme**
-- ✅ **TLS/SSL** sur toutes les communications
+-  **Zéro donnée patient hors-premise** (100% on-premise)
+-  **Logs chiffrés AES256**
+-  **Rétention 90 jours** avec purge automatique
+-  **RGPD by design**
+-  **Loi Ségur conforme**
+- **TLS/SSL** sur toutes les communications
 
 ---
 
-## 📈 Roadmap
+##  Roadmap
 
-### ✅ Phase 1 : Fondations (J+1-2)
+### ✅ Phase 1 : Fondations 
 - [x] Setup lab & architecture decisions
 - [x] Repository GitHub initialisé
 - [x] Documentation de base
 
-### 🟡 Phase 2 : Infrastructure Mail (J+3-4)
+### 🟡 Phase 2 : Infrastructure Mail 
 - [ ] Mailcow déployé
 - [ ] Rspamd configuré
 - [ ] ClamAV opérationnel
 
-### 🟡 Phase 3 : Sandbox & Threat Intel (J+5-6)
+### 🟡 Phase 3 : Sandbox & Threat Intel 
 - [ ] CAPE Sandbox setup
 - [ ] Règles YARA v1 (5 règles)
 - [ ] MISP instance lancée
 
-### 🔴 Phase 4 : Orchestrateur (J+7-8)
+### 🔴 Phase 4 : Orchestrateur 
 - [ ] API FastAPI complète
 - [ ] Hashing + heuristique
 - [ ] Intégration CAPE
 
-### 🔴 Phase 5 : Intégration (J+9-10)
+### 🔴 Phase 5 : Intégration 
 - [ ] Pipeline end-to-end
 - [ ] Tests intégration
 
-### 🔴 Phase 6 : Intelligence (J+11-12)
+### 🔴 Phase 6 : Intelligence 
 - [ ] Boucle MISP feedback
 - [ ] Règles YARA v2
 
-### 🔴 Phase 7 : Démo & Doc (J+13-14)
+### 🔴 Phase 7 : Démo & Doc 
 - [ ] Vidéo démo
 - [ ] Documentation finale
 - [ ] Playbook Ansible
 
 ---
 
-## 👥 Équipe
-
-| Membre | Rôle | GitHub |
-|--------|------|--------|
-| **Mohamed** | Chef de projet / DevOps | [@f3n999](https://github.com/f3n999) |
-| **Coéquipier 1** | Infra Mail | @username1 |
-| **Coéquipier 2** | Backend / Orchestrateur | @username2 |
-| **Coéquipier 3** | Threat Intel & Sandbox | @username3 |
-| **Coéquipier 4** | QA & Documentation | @username4 |
 
 **École** : Oteria Cyber School B3 - Levallois-Perret, Île-de-France  
-**Deadline** : 14 janvier 2026
 
 ---
 
-## 🤝 Contribution
-
-Voir [CONTRIBUTING.md](CONTRIBUTING.md) pour les guidelines de contribution.
 
 ### Workflow Git
 
@@ -329,13 +316,13 @@ git push origin feature/nom-de-ta-feature
 
 ---
 
-## 📝 License
+##  License
 
 Ce projet est sous licence **GPL-3.0** - voir [LICENSE](LICENSE) pour détails.
 
 ---
 
-## 🔗 Ressources
+##  Ressources
 
 - **CAPE Sandbox** : https://capesandbox.com/docs/
 - **YARA** : https://yara.readthedocs.io/
@@ -345,7 +332,7 @@ Ce projet est sous licence **GPL-3.0** - voir [LICENSE](LICENSE) pour détails.
 
 ---
 
-## 📞 Support
+##  Support
 
 - **Issues GitHub** : [Créer une issue](https://github.com/f3n999/SandBox/issues)
 - **Discussions** : [GitHub Discussions](https://github.com/f3n999/SandBox/discussions)
@@ -353,6 +340,3 @@ Ce projet est sous licence **GPL-3.0** - voir [LICENSE](LICENSE) pour détails.
 
 ---
 
-**Fait avec ❤️ par l'équipe B3 Oteria Cyber School**
-
-**#Cybersecurity #Ransomware #OpenSource #Healthcare #RGPD**
