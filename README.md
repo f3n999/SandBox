@@ -1,4 +1,4 @@
-# 🛡️ Défense Anti-Ransomware — Sécurité Email pour le Secteur Santé
+#  Défense Anti-Ransomware — Sécurité Email pour le Secteur Santé
 
 > **Mission Sandboxing 2025–2026** — Oteria Cyber School B3  
 > Détection de ransomware par email avec analyse dynamique et threat intelligence, conçue pour le milieu hospitalier, déployable sans licence propriétaire.
