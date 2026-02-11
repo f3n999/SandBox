@@ -1,0 +1,186 @@
+services:
+  # ==================== ORCHESTRATOR ====================
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: orchestrator
+    restart: unless-stopped
+    ports:
+      - "${ORCHESTRATOR_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379/0
+      - CAPE_API_URL=http://cape:8000
+      - CAPE_API_TOKEN=${CAPE_API_TOKEN}
+      - MISP_URL=http://misp:80
+      - MISP_API_KEY=${MISP_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-["https://dashboard.defense-ransomware.local"]}
+    networks:
+      - ransomware-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # ==================== CAPE SANDBOX ====================
+  cape:
+    image: kevoreilly/cape2:latest
+    container_name: cape-sandbox
+    restart: unless-stopped
+    ports:
+      - "8080:8000"   # CAPE Web UI / API
+    volumes:
+      - cape-storage:/opt/CAPEv2/storage
+      - ./yara-rules:/opt/CAPEv2/data/yara/custom
+    environment:
+      - CAPE_DATABASE_CONNECTION=postgresql://cape_user:${CAPE_DB_PASSWORD}@postgres:5432/cape_db
+      - CAPE_MONGO_HOST=mongodb
+      - CAPE_MONGO_PORT=27017
+    networks:
+      - ransomware-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    privileged: true
+
+  # ==================== MISP ====================
+  misp:
+    image: coolacid/misp-docker:latest
+    container_name: misp
+    restart: unless-stopped
+    ports:
+      - "8443:443"    # MISP HTTPS
+      - "8081:80"     # MISP HTTP (pas 8080 — conflit résolu)
+    volumes:
+      - misp-data:/var/www/MISP
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_DATABASE=misp
+      - MYSQL_USER=misp
+      - MYSQL_PASSWORD=${MYSQL_MISP_PASSWORD}
+      - MISP_ADMIN_EMAIL=${MISP_ADMIN_EMAIL}
+      - MISP_ADMIN_PASSPHRASE=${MISP_ADMIN_PASSPHRASE}
+      - MISP_BASEURL=${MISP_BASEURL:-https://misp.defense-ransomware.local}
+    networks:
+      - ransomware-net
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ==================== DATABASES ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    networks:
+      - ransomware-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    restart: unless-stopped
+    volumes:
+      - mysql-data:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=misp
+      - MYSQL_USER=misp
+      - MYSQL_PASSWORD=${MYSQL_MISP_PASSWORD}
+    networks:
+      - ransomware-net
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - ransomware-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - ransomware-net
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== MONITORING ====================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+    networks:
+      - ransomware-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+    networks:
+      - ransomware-net
+
+networks:
+  ransomware-net:
+    driver: bridge
+
+volumes:
+  cape-storage:
+  misp-data:
+  postgres-data:
+  mysql-data:
+  mongodb-data:
+  redis-data:
+  grafana-data:
+  prometheus-data:
