@@ -307,10 +307,14 @@ services:
     secrets:
       - source: grafana_password
         target: /run/secrets/grafana_password
+      # Mot de passe Postgres — lu par la datasource Grafana via $__file{}
+      - source: postgres_password
+        target: /run/secrets/postgres_password
     networks:
       - internal
     depends_on:
       - prometheus
+      - postgres
 
 
 # ════════════════════════════════════════════════════════════

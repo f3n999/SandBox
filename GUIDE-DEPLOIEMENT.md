@@ -141,6 +141,22 @@ curl -X POST http://localhost:8000/api/v1/scan/trigger \
 - **Prometheus** : http://serveur:9090
 - **MISP** : https://serveur:8443
 
+### Dashboards Grafana (provisionnés automatiquement)
+
+| Dashboard | Source | Contenu |
+|-----------|--------|---------|
+| **SOC Verdicts (PostgreSQL)** | datasource `PostgreSQL-Verdicts` | **Vue démo** : emails analysés, bloqués, en quarantaine, répartition des verdicts, top menaces, top expéditeurs bloqués, courbe analysés/bloqués. Lit directement `email_analyses` / `attachment_verdicts`. |
+| **SOC Overview** | datasource `Prometheus` | Santé API : requêtes/s par status, latence P50/P95, trafic par endpoint. |
+
+> La datasource Postgres lit son mot de passe depuis le Docker Secret
+> `postgres_password` via `$__file{/run/secrets/postgres_password}` (aucun
+> mot de passe en clair dans le provisioning).
+>
+> **Pour la démo**, ouvrir *SOC Verdicts* : il se peuple dès le premier scan
+> Graph (les verdicts sont persistés en PostgreSQL par le pipeline). Le panel
+> "Emails analysés" de *SOC Overview* ne compte que les appels HTTP `/analyze`,
+> pas l'ingestion Graph — c'est attendu.
+
 ---
 
 ## Maintenance
