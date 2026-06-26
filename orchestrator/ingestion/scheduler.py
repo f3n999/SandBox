@@ -95,10 +95,14 @@ class GraphScheduler:
         await self._persist_session_start(stats)
 
         try:
+            # On RÉUTILISE le même `stats` (donc le même session_id que la
+            # ScanSession persistée ci-dessus) : sinon scan_tenant créait sa
+            # propre session_id et _persist_session_end ne trouvait jamais la ligne.
             stats = await ingestor.scan_tenant(
                 emails_per_user=self.emails_per_user,
                 max_users=self.max_users,
                 since=since,
+                stats=stats,
             )
         except Exception as exc:
             logger.exception("Scheduled scan failed : %s", exc)

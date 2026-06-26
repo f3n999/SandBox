@@ -1,0 +1,21 @@
+apiVersion: 1
+
+# Source de données PostgreSQL — alimente la vue SOC "Verdicts" avec les
+# vraies analyses persistées (email_analyses / attachment_verdicts).
+# Le mot de passe est lu depuis le Docker Secret monté dans le container Grafana.
+datasources:
+  - name: PostgreSQL-Verdicts
+    uid: mgx_postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: postgres
+    database: orchestrator_db
+    isDefault: false
+    editable: false
+    secureJsonData:
+      password: $__file{/run/secrets/postgres_password}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false

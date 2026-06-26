@@ -1,0 +1,127 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Emails\" FROM email_analyses WHERE $__timeFilter(created_at)", "refId": "A"}
+      ],
+      "title": "Emails analysés",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}]}}},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Bloqués\" FROM email_analyses WHERE overall_verdict = 'block' AND $__timeFilter(created_at)", "refId": "A"}
+      ],
+      "title": "Emails bloqués",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "orange", "value": null}]}}},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Quarantaine\" FROM email_analyses WHERE overall_verdict = 'quarantine' AND $__timeFilter(created_at)", "refId": "A"}
+      ],
+      "title": "En quarantaine",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}]}}},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "area", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT count(*) AS \"Suspects\" FROM email_analyses WHERE overall_verdict IN ('suspect','request_deep_analysis') AND $__timeFilter(created_at)", "refId": "A"}
+      ],
+      "title": "Suspects",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}},
+      "gridPos": {"h": 9, "w": 8, "x": 0, "y": 4},
+      "id": 5,
+      "options": {"legend": {"displayMode": "list", "placement": "right", "values": []}, "pieType": "donut", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT overall_verdict AS metric, count(*) AS value FROM email_analyses WHERE $__timeFilter(created_at) GROUP BY overall_verdict ORDER BY value DESC", "refId": "A"}
+      ],
+      "title": "Répartition des verdicts",
+      "type": "piechart"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "filterable": false}}},
+      "gridPos": {"h": 9, "w": 8, "x": 8, "y": 4},
+      "id": 6,
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Occurrences", "desc": true}]},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT threat_name AS \"Menace\", count(*) AS \"Occurrences\" FROM attachment_verdicts WHERE verdict IN ('block','quarantine') AND threat_name IS NOT NULL AND $__timeFilter(created_at) GROUP BY threat_name ORDER BY count(*) DESC LIMIT 10", "refId": "A"}
+      ],
+      "title": "Top menaces détectées",
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "filterable": false}}},
+      "gridPos": {"h": 9, "w": 8, "x": 16, "y": 4},
+      "id": 7,
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Bloqués", "desc": true}]},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "table", "rawQuery": true, "rawSql": "SELECT sender_domain AS \"Domaine\", count(*) AS \"Bloqués\" FROM email_analyses WHERE overall_verdict IN ('block','quarantine') AND $__timeFilter(created_at) GROUP BY sender_domain ORDER BY count(*) DESC LIMIT 10", "refId": "A"}
+      ],
+      "title": "Top expéditeurs bloqués",
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "postgres", "uid": "mgx_postgres"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "drawStyle": "line", "fillOpacity": 20, "lineWidth": 2, "stacking": {"group": "A", "mode": "none"}}}},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 13},
+      "id": 8,
+      "options": {"legend": {"calcs": [], "displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "time_series", "rawQuery": true, "rawSql": "SELECT $__timeGroup(created_at, '1h') AS time, count(*) AS \"Emails analysés\" FROM email_analyses WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", "refId": "A"},
+        {"datasource": {"type": "postgres", "uid": "mgx_postgres"}, "format": "time_series", "rawQuery": true, "rawSql": "SELECT $__timeGroup(created_at, '1h') AS time, count(*) FILTER (WHERE overall_verdict = 'block') AS \"Bloqués\" FROM email_analyses WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1", "refId": "B"}
+      ],
+      "title": "Emails analysés / bloqués dans le temps",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["mailguardianx", "soc", "verdicts"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "",
+  "title": "MailGuardianX — SOC Verdicts (PostgreSQL)",
+  "uid": "mgx-soc-verdicts",
+  "version": 1
+}

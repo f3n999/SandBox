@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import bcrypt
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrator.core.config import get_settings
@@ -172,6 +172,21 @@ class APIKeyService:
         )
         result = await db.execute(stmt)
         return result.rowcount > 0
+
+    async def any_key_exists(self, db: AsyncSession) -> bool:
+        """
+        Une clé a-t-elle DÉJÀ été créée (même révoquée) ?
+
+        Sert au bootstrap : la création non authentifiée n'est permise QUE si
+        aucune clé n'a jamais existé. On ne se base PAS sur le nombre de clés
+        *actives* — sinon révoquer toutes les clés rouvrirait la création
+        d'une clé admin non authentifiée (backdoor de prise de contrôle).
+        Repartir d'un état tout-révoqué se fait par la base/CLI, jamais par un
+        endpoint HTTP ouvert.
+        """
+        stmt = select(func.count()).select_from(APIKey)
+        result = await db.execute(stmt)
+        return int(result.scalar() or 0) > 0
 
     async def list_active(self, db: AsyncSession) -> list[dict]:
         stmt = (

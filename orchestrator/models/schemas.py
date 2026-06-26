@@ -69,6 +69,7 @@ class EmailMetadata(BaseModel):
     subject_hash: str = Field(..., description="Hash du sujet (pas le sujet lui-même)")
     received_at: datetime
     has_attachments: bool
+    reply_to: Optional[str] = None
     spf_result: Optional[str] = None
     dkim_result: Optional[str] = None
     dmarc_result: Optional[str] = None
@@ -167,24 +168,31 @@ class RiskScore(BaseModel):
     breakdown: dict = {}
 
     def compute_total(self) -> float:
-        """Combine les scores en cumulatif borné [0,1] avec pondérations."""
+        """
+        Combine les scores en cumulatif borné [0,1].
+
+        Pondérations normalisées (somme = 1.0). L'heuristique domine : les
+        signaux décisifs (YARA/ClamAV/MISP forts, hit cache) court-circuitent
+        déjà le pipeline AVANT cette agrégation — ici on n'arbitre que les cas
+        "moyens", où l'heuristique + la réputation expéditeur sont l'essentiel
+        de l'information disponible. `hash_score` est exclu : il n'est jamais
+        peuplé (le cache Redis tranche les hash connus en amont).
+        """
         weights = {
-            "hash": 0.30,
-            "heuristic": 0.15,
-            "yara": 0.20,
-            "clamav": 0.20,
-            "misp": 0.20,
-            "cape": 0.25,
-            "sender": 0.05,
+            "heuristic": 0.50,
+            "sender": 0.20,
+            "yara": 0.10,
+            "clamav": 0.08,
+            "misp": 0.08,
+            "cape": 0.04,
         }
         raw = (
-            self.hash_score * weights["hash"]
-            + self.heuristic_score * weights["heuristic"]
+            self.heuristic_score * weights["heuristic"]
+            + self.sender_score * weights["sender"]
             + self.yara_score * weights["yara"]
             + self.clamav_score * weights["clamav"]
             + self.misp_score * weights["misp"]
             + self.cape_score * weights["cape"]
-            + self.sender_score * weights["sender"]
         )
         self.total = min(1.0, raw)
         return self.total

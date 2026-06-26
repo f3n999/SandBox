@@ -179,6 +179,21 @@ class TestEmailContext:
         result = engine.score_email_context(req)
         assert "mass_recipients" in str(result["reasons"])
 
+    def test_reply_to_mismatch_flagged(self, engine):
+        """Reply-To sur un autre domaine que l'expéditeur = signal fort."""
+        req = _make_request(sender="compta@hopital-paris.fr")
+        req.email.reply_to = "attaquant@gmail.com"
+        result = engine.score_email_context(req)
+        assert "reply_to_mismatch" in str(result["reasons"])
+        assert result["score"] >= 0.30
+
+    def test_reply_to_same_domain_ok(self, engine):
+        """Reply-To sur le même domaine = pas d'alerte."""
+        req = _make_request(sender="compta@hopital-paris.fr")
+        req.email.reply_to = "support@hopital-paris.fr"
+        result = engine.score_email_context(req)
+        assert "reply_to_mismatch" not in str(result["reasons"])
+
 
 # ──────────────────── Tests Pipeline Complet ────────────────────
 

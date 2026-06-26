@@ -120,8 +120,10 @@ class TestPipelineWithBytes:
             threat_name="YARA/Ransomware_CryptoAPI_Usage",
         ))
 
+        # file_type OTHER (heuristique basse) pour que le pipeline atteigne YARA
+        # sans court-circuiter sur l'heuristique (un .exe bloque avant à 0.95).
         request = make_request(
-            attachments=[make_attachment(file_type=FileType.EXE, sha256="c" * 64)],
+            attachments=[make_attachment(file_type=FileType.OTHER, sha256="c" * 64)],
             sender="x@y.com",
         )
         bytes_map = {"c" * 64: b"MZ\x90\x00malicious content"}
@@ -143,8 +145,10 @@ class TestPipelineWithBytes:
             infected=True, signature="Eicar-Test-Signature", status="FOUND",
         ))
 
+        # file_type OTHER pour atteindre ClamAV (YARA ne matche pas ici) sans
+        # court-circuiter sur l'heuristique.
         request = make_request(
-            attachments=[make_attachment(file_type=FileType.EXE, sha256="d" * 64)],
+            attachments=[make_attachment(file_type=FileType.OTHER, sha256="d" * 64)],
         )
         bytes_map = {"d" * 64: b"infected"}
         response = await orchestrator.analyze_with_bytes(request, bytes_map)

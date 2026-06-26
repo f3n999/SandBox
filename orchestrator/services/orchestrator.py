@@ -1,10 +1,10 @@
 """
 Orchestrateur principal — pipeline de décision en cascade.
 
-Mode metadata-only (legacy agent) :
+Mode metadata-only (hash + métadonnées seuls, sans contenu) :
     Cache → Heuristique → MISP → [REQUEST_DEEP_ANALYSIS si suspect]
 
-Mode bytes-available (Graph API ingestion ou /upload) :
+Mode bytes-available (ingestion M365/Graph ou /upload — chemin nominal) :
     Cache → Heuristique → YARA → ClamAV → MISP → CAPE Sandbox
 
 Chaque étape peut court-circuiter le pipeline avec un verdict définitif
@@ -80,7 +80,7 @@ class OrchestratorService:
         self.threshold_block = score_threshold_block
 
     # ════════════════════════════════════════════════════════════
-    #  Entrée publique : metadata-only (legacy /api/v1/analyze)
+    #  Entrée publique : metadata-only (hash seul — /api/v1/analyze)
     # ════════════════════════════════════════════════════════════
 
     async def analyze(self, request: AnalysisRequest) -> AnalysisResponse:
@@ -328,13 +328,13 @@ class OrchestratorService:
         }
 
     # ────────────────────────────────────────────────────────
-    #  CAPE async (appelée par /api/v1/upload pour le legacy)
+    #  CAPE async (appelée par /api/v1/upload — upload direct d'un fichier)
     # ────────────────────────────────────────────────────────
 
     async def analyze_with_cape(
         self, task_id: str, sha256: str, file_data: bytes, filename: str
     ) -> AttachmentVerdict:
-        """Analyse CAPE explicite (chemin profond legacy)."""
+        """Analyse CAPE explicite (chemin profond — upload direct d'un fichier)."""
         logger.info("[%s] CAPE explicit for %s…", task_id, sha256[:12])
 
         # YARA + ClamAV d'abord (rapides), CAPE seulement si besoin

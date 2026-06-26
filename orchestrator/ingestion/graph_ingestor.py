@@ -24,7 +24,14 @@ from orchestrator.ingestion.graph_client import (
 from orchestrator.models.schemas import (
     AnalysisRequest, AnalysisResponse, AttachmentMetadata, EmailMetadata, FileType,
 )
+from sqlalchemy import delete
+
 from orchestrator.services.orchestrator import OrchestratorService
+from orchestrator.db.session import session_scope
+from orchestrator.models.database import (
+    AttachmentVerdict as AttachmentVerdictRow,
+    EmailAnalysis as EmailAnalysisRow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +119,7 @@ def _build_analysis_request(
             subject_hash=subject_hash,
             received_at=message.received_at,
             has_attachments=True,
+            reply_to=message.reply_to,
             spf_result=message.spf_result,
             dkim_result=message.dkim_result,
             dmarc_result=message.dmarc_result,
@@ -178,6 +186,7 @@ class GraphIngestor:
         emails_per_user: int = 25,
         since: Optional[datetime] = None,
         stats: Optional[IngestionStats] = None,
+        session_id: Optional[str] = None,
     ) -> list[AnalysisResponse]:
         """Scanne une boîte. Retourne les réponses d'analyse."""
         mailbox_id = user.user_principal_name or user.id
@@ -190,7 +199,7 @@ class GraphIngestor:
         responses: list[AnalysisResponse] = []
         for msg in messages:
             try:
-                response = await self._scan_message(user, msg, stats=stats)
+                response = await self._scan_message(user, msg, stats=stats, session_id=session_id)
                 if response is not None:
                     responses.append(response)
             except Exception as exc:  # noqa: BLE001
@@ -208,6 +217,7 @@ class GraphIngestor:
         user: GraphUser,
         msg: GraphMessage,
         stats: Optional[IngestionStats] = None,
+        session_id: Optional[str] = None,
     ) -> Optional[AnalysisResponse]:
         """Télécharge les PJ d'un message et lance l'analyse."""
         mailbox = user.user_principal_name or user.id
@@ -254,24 +264,127 @@ class GraphIngestor:
             response.analysis_time_ms or 0,
         )
 
+        # Persistance PostgreSQL — audit RGPD + alimentation /stats + Grafana
+        await self._persist_analysis(user, msg, attachment_metas, response, session_id)
+
         if stats:
             stats.record_verdict(response)
         return response
+
+    async def _persist_analysis(
+        self,
+        user: GraphUser,
+        msg: GraphMessage,
+        attachment_metas: list[AttachmentMetadata],
+        response: AnalysisResponse,
+        session_id: Optional[str] = None,
+    ) -> None:
+        """
+        Écrit le verdict en PostgreSQL : une ligne EmailAnalysis + N AttachmentVerdict.
+
+        C'est CE qui alimente /api/v1/stats, le dashboard Grafana et la piste
+        d'audit RGPD. Échoue en silence (log ERROR) pour ne jamais interrompre
+        un scan à cause d'un souci DB ponctuel — l'analyse elle-même a déjà eu lieu.
+        """
+        try:
+            meta_by_sha = {m.sha256.lower(): m for m in attachment_metas}
+            mailbox = user.user_principal_name or user.id
+            risk_score = max((a.confidence for a in response.attachments), default=0.0)
+
+            # ID déterministe (tenant + message) : ré-analyser le MÊME email lors
+            # d'un scan différentiel chevauchant (overlap 5 min) NE crée PAS de
+            # doublon — sinon /stats et Grafana sur-comptent. On remplace
+            # l'enregistrement existant (DELETE cascade puis insert).
+            email_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"mgx|{self.tenant_id}|{msg.id}"))
+
+            async with session_scope() as db:
+                await db.execute(
+                    delete(EmailAnalysisRow).where(EmailAnalysisRow.id == email_id)
+                )
+                email_row = EmailAnalysisRow(
+                    id=email_id,
+                    session_id=session_id,
+                    message_id=msg.id,
+                    tenant_id=self.tenant_id,
+                    mailbox_user=mailbox,
+                    subject_hash=hashlib.sha256(
+                        msg.subject.encode("utf-8", errors="ignore")
+                    ).hexdigest(),
+                    sender=msg.sender_address or "unknown@unknown.invalid",
+                    sender_domain=msg.sender_domain or "unknown.invalid",
+                    reply_to=msg.reply_to,
+                    spf_result=msg.spf_result,
+                    dkim_result=msg.dkim_result,
+                    dmarc_result=msg.dmarc_result,
+                    recipient_count=msg.recipient_count,
+                    has_attachments=True,
+                    received_at=msg.received_at,
+                    overall_verdict=response.overall_verdict.value,
+                    stage=response.stage.value,
+                    risk_score=risk_score,
+                    analysis_time_ms=response.analysis_time_ms,
+                )
+                db.add(email_row)
+
+                for av in response.attachments:
+                    meta = meta_by_sha.get(av.sha256.lower())
+                    db.add(AttachmentVerdictRow(
+                        email_id=email_row.id,
+                        sha256=av.sha256,
+                        sha1=meta.sha1 if meta else None,
+                        md5=meta.md5 if meta else None,
+                        filename=(meta.filename if meta else "unknown")[:512],
+                        file_size=meta.file_size if meta else 0,
+                        file_type=meta.file_type.value if meta else "other",
+                        mime_type=meta.mime_type if meta else None,
+                        is_encrypted=meta.is_encrypted if meta else False,
+                        is_macro_enabled=meta.is_macro_enabled if meta else False,
+                        verdict=av.verdict.value,
+                        confidence=av.confidence,
+                        threat_name=av.threat_name,
+                        analysis_source=av.analysis_source,
+                        signatures_matched=av.signatures_matched,
+                        heuristic_score=av.heuristic_score,
+                        yara_matches=av.yara_matches,
+                        clamav_signature=av.clamav_signature,
+                        misp_score=av.misp_score,
+                        cape_score=av.cape_score,
+                        cape_task_id=av.cape_task_id,
+                    ))
+
+            logger.debug(
+                "Persisté : email=%s (%d PJ) verdict=%s",
+                response.task_id, len(response.attachments), response.overall_verdict.value,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Persistance verdict échouée (msg=%s) : %s", msg.id, exc, exc_info=True
+            )
 
     async def scan_tenant(
         self,
         emails_per_user: int = 25,
         max_users: int = 500,
         since: Optional[datetime] = None,
+        stats: Optional[IngestionStats] = None,
     ) -> IngestionStats:
-        """Scan complet du tenant."""
-        stats = IngestionStats()
+        """
+        Scan complet du tenant.
+
+        Si `stats` est fourni (cas du scheduler), il est RÉUTILISÉ — son
+        `session_id` doit correspondre à la ScanSession déjà persistée pour que
+        les EmailAnalysis soient correctement rattachées et que les compteurs de
+        fin de session soient mis à jour sur la bonne ligne.
+        """
+        stats = stats or IngestionStats()
+        session_id = stats.session_id
         users = await self.graph.list_users(top=max_users)
         stats.users_scanned = len(users)
 
         for user in users:
             await self.scan_user_inbox(
-                user, emails_per_user=emails_per_user, since=since, stats=stats,
+                user, emails_per_user=emails_per_user, since=since,
+                stats=stats, session_id=session_id,
             )
 
         stats.finished_at = datetime.now(timezone.utc)

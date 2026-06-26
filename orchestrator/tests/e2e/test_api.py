@@ -82,6 +82,8 @@ class TestAnalyzeRequiresAuth:
 
 
 class TestVerdictEndpoint:
-    def test_unknown_verdict_returns_404(self, api_client):
+    def test_verdict_requires_auth(self, api_client):
+        """/verdict est désormais protégé : sans X-API-Key → rejeté (jamais 200/404)."""
         r = api_client.get("/api/v1/verdict/unknown-task-id")
-        assert r.status_code == 404
+        # header X-API-Key manquant → 422 (validation). Avec DB indispo → 401/500.
+        assert r.status_code in (401, 422, 500)

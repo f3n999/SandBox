@@ -67,7 +67,9 @@ class ScanSession(Base):
 class EmailAnalysis(Base):
     """Analyse d'un email (peut contenir N pièces jointes).
 
-    Table partitionnée RANGE par mois sur received_at — voir migration Alembic.
+    PK = uuid5 déterministe (tenant + message_id) côté ingestion : une
+    ré-analyse du même email (scan différentiel chevauchant) remplace la ligne
+    au lieu d'en créer une nouvelle.
     """
     __tablename__ = "email_analyses"
 

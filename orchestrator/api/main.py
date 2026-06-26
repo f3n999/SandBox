@@ -244,6 +244,35 @@ async def rate_limit_check(
     return x_agent_id
 
 
+ALLOWED_SCOPES = {"analyze", "upload", "admin"}
+
+
+def require_scope(scope: str):
+    """Dépendance : exige une clé API valide PORTANT le scope demandé (ou 'admin')."""
+    async def _dep(key: AuthenticatedKey = Depends(verify_api_key)) -> AuthenticatedKey:
+        if scope not in key.scopes and "admin" not in key.scopes:
+            raise HTTPException(status_code=403, detail=f"Scope requis : {scope}")
+        return key
+    return _dep
+
+
+async def authorize_key_creation(
+    db: AsyncSession = Depends(get_session),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+) -> None:
+    """
+    Création de clé API : libre UNIQUEMENT au bootstrap (aucune clé active en base).
+    Dès qu'une clé existe, une clé valide avec scope 'admin' est exigée.
+    """
+    if not await services.api_keys.any_key_exists(db):
+        return  # bootstrap : aucune clé n'a jamais existé en base
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="X-API-Key requis")
+    key = await services.api_keys.verify(db, x_api_key)
+    if key is None or "admin" not in key.scopes:
+        raise HTTPException(status_code=403, detail="Scope admin requis")
+
+
 # ─────────────────────────────────────────────────────────────
 #  Endpoints publics
 # ─────────────────────────────────────────────────────────────
@@ -298,10 +327,13 @@ async def health_check():
 @app.post("/api/v1/analyze", response_model=AnalysisResponse)
 async def analyze_email(
     request: AnalysisRequest,
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("analyze")),
     agent_id: str = Depends(rate_limit_check),
 ):
-    """Analyse metadata-only — agent envoie les métadonnées + hash."""
+    """Analyse metadata-only — hash + métadonnées seuls, sans contenu de fichier.
+
+    Source d'ingestion nominale = tenant M365 via Graph (scheduler). Ce endpoint
+    sert les intégrations qui ne fournissent qu'un hash + métadonnées."""
     try:
         return await services.orchestrator.analyze(request)
     except Exception as exc:
@@ -315,7 +347,7 @@ async def upload_for_deep_analysis(
     sha256: str = Form(...),
     agent_id: str = Form(...),
     file: UploadFile = File(...),
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("upload")),
 ):
     """Upload PJ — déclenche YARA + ClamAV + CAPE (chemin profond)."""
     contents = await file.read()
@@ -349,7 +381,7 @@ async def upload_for_deep_analysis(
 async def upload_for_async_analysis(
     sha256: str = Form(...),
     file: UploadFile = File(...),
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("upload")),
 ):
     """Upload PJ en mode async (Celery) — retourne immédiatement un celery_task_id."""
     contents = await file.read()
@@ -366,7 +398,10 @@ async def upload_for_async_analysis(
 
 
 @app.get("/api/v1/verdict/{task_id}")
-async def get_verdict(task_id: str):
+async def get_verdict(
+    task_id: str,
+    _: AuthenticatedKey = Depends(verify_api_key),
+):
     """Récupère un verdict mis en cache par task_id."""
     cached = await services.cache.get_task_verdict(task_id)
     if cached:
@@ -375,7 +410,10 @@ async def get_verdict(task_id: str):
 
 
 @app.get("/api/v1/celery/{job_id}")
-async def get_celery_result(job_id: str):
+async def get_celery_result(
+    job_id: str,
+    _: AuthenticatedKey = Depends(verify_api_key),
+):
     """Récupère le résultat d'une tâche Celery (analyse asynchrone)."""
     from orchestrator.celery_app import celery_app
     result = celery_app.AsyncResult(job_id)
@@ -394,6 +432,7 @@ async def get_celery_result(job_id: str):
 async def get_statistics(
     window_hours: int = 24,
     db: AsyncSession = Depends(get_session),
+    _: AuthenticatedKey = Depends(verify_api_key),
 ):
     return await services.stats.compute(db, window_hours=window_hours)
 
@@ -402,13 +441,14 @@ async def get_statistics(
 async def list_sessions(
     limit: int = 20,
     db: AsyncSession = Depends(get_session),
+    _: AuthenticatedKey = Depends(verify_api_key),
 ):
     return await services.stats.recent_sessions(db, limit=limit)
 
 
 @app.post("/api/v1/scan/trigger")
 async def trigger_scan_now(
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("admin")),
 ):
     """Force un scan Graph maintenant (hors planning)."""
     if services.scheduler is None:
@@ -423,7 +463,7 @@ async def trigger_scan_now(
 @app.post("/api/v1/whitelist/{sha256}")
 async def whitelist_hash(
     sha256: str,
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("admin")),
 ):
     await services.cache.set_hash_verdict(
         sha256.lower(), Verdict.ALLOW,
@@ -436,7 +476,7 @@ async def whitelist_hash(
 async def blacklist_hash(
     sha256: str,
     threat_name: str = "Manual/Blacklist",
-    _: AuthenticatedKey = Depends(verify_api_key),
+    _: AuthenticatedKey = Depends(require_scope("admin")),
 ):
     await services.cache.set_hash_verdict(
         sha256.lower(), Verdict.BLOCK,
@@ -455,10 +495,19 @@ async def create_api_key(
     name: str = Form(...),
     scopes: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_session),
+    _: None = Depends(authorize_key_creation),
 ):
-    """Crée une nouvelle clé API. Bootstrap : non-authentifié au premier démarrage,
-    à protéger via reverse-proxy ensuite."""
-    scope_list = [s.strip() for s in (scopes or "").split(",") if s.strip()]
+    """Crée une nouvelle clé API.
+
+    Bootstrap : non-authentifié UNIQUEMENT tant qu'aucune clé n'existe en base.
+    Dès la première clé créée, ce endpoint exige une clé valide avec scope 'admin'."""
+    scope_list = [s.strip().lower() for s in (scopes or "").split(",") if s.strip()]
+    invalid = sorted(set(scope_list) - ALLOWED_SCOPES)
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Scopes invalides : {invalid} (autorisés : {sorted(ALLOWED_SCOPES)})",
+        )
     issued = await services.api_keys.create(db, name=name, scopes=scope_list)
     return {
         "id": issued.id,
@@ -473,6 +522,7 @@ async def create_api_key(
 @app.get("/api/v1/admin/keys")
 async def list_api_keys(
     db: AsyncSession = Depends(get_session),
+    _: AuthenticatedKey = Depends(require_scope("admin")),
 ):
     return await services.api_keys.list_active(db)
 
@@ -481,6 +531,7 @@ async def list_api_keys(
 async def revoke_api_key(
     key_id: int,
     db: AsyncSession = Depends(get_session),
+    _: AuthenticatedKey = Depends(require_scope("admin")),
 ):
     ok = await services.api_keys.revoke(db, key_id)
     if not ok:

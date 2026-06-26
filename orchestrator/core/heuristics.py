@@ -68,9 +68,13 @@ class HeuristicEngine:
             score = min(1.0, score + 0.25)
             reasons.append("encrypted_archive")
 
-        # 3. Macros activées
+        # 3. Macros activées — +0.15 (et NON +0.30) volontairement : un document
+        #    Office macro est suspect mais courant en milieu hospitalier. À +0.30
+        #    un .docm atteignait 0.95+ → auto-BLOCK et faux positifs sur des macros
+        #    légitimes. À +0.15 il reste sous le seuil d'auto-block et part en
+        #    analyse profonde (CAPE), qui tranche réellement.
         if attachment.is_macro_enabled:
-            score = min(1.0, score + 0.30)
+            score = min(1.0, score + 0.15)
             reasons.append("macro_enabled")
 
         # 4. Double extension (facture.pdf.exe)
@@ -129,6 +133,15 @@ class HeuristicEngine:
                 score += 0.35
                 reasons.append(f"health_domain_spoofing:{spoofed}")
                 break
+
+        # 3b. Reply-To pointant vers un autre domaine que l'expéditeur
+        #     (signal phishing / BEC fort — réponse détournée vers l'attaquant)
+        reply_to = (email.reply_to or "").lower()
+        if reply_to and "@" in reply_to:
+            reply_domain = reply_to.split("@", 1)[1]
+            if reply_domain and reply_domain != domain:
+                score += 0.30
+                reasons.append(f"reply_to_mismatch:{reply_domain}")
 
         # 4. Envoi de masse
         if email.recipient_count > 50:

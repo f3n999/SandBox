@@ -7,6 +7,19 @@ Pipeline multi-couches qui analyse les emails d'un tenant Microsoft 365 via Grap
 
 ---
 
+## Périmètre
+
+| | |
+|---|---|
+| **Source d'ingestion** | Microsoft 365 / Outlook via Graph API (app-only, Client Credentials). **Unique source.** Pas d'agent sur les postes, pas de parser EML local, pas de plugin Gmail/Outlook. |
+| **Scope de détection** | Anti-ransomware en **pièce jointe** (extension, macro, signatures YARA/ClamAV, IOC MISP, détonation CAPE). |
+| **Base de données** | PostgreSQL (pas SQLite). |
+| **Hors-scope actuel** | Détection phishing-texte (homoglyphes, mots-clés, analyse d'URLs, VirusTotal/URLScan) — prévu **après** la première démo. |
+
+> Toute mention de SQLite, parser EML, agent poste ou plugin mail dans d'anciens documents est **obsolète** : seule l'ingestion tenant M365/Graph fait foi.
+
+---
+
 ## Pourquoi
 
 Les hôpitaux sont la cible #1 des ransomwares. Le vecteur principal : email avec pièce jointe piégée. Les solutions du marché (Proofpoint, Fortinet…) coûtent **10 000 à 50 000 €/an**, sont opaques, et souvent cloud-first — incompatible avec les contraintes RGPD des données patient.
@@ -206,7 +219,7 @@ Documentation interactive : `https://serveur:8000/docs` (Swagger UI).
 | Pas de données patient | Corps d'email, champs patients, noms → jamais transmis |
 | Chiffrement en transit | TLS partout (HTTPS, asyncpg SSL, Redis password) |
 | Suppression après analyse | Fichiers envoyés à CAPE supprimés après verdict (TTL configurable) |
-| Restriction d'accès | API keys bcrypt + scopes + rate limiting par agent |
+| Restriction d'accès | API keys bcrypt + scopes vérifiés + rate limiting par source |
 | Traçabilité | `scan_sessions` + `email_analyses` en PostgreSQL avec timestamps |
 | Réseau isolé | CAPE tourne sur `internal: true` (INetSim simule Internet) |
 | Secrets | Docker Secrets uniquement (pas d'env vars sensibles, pas de fichiers committés) |
