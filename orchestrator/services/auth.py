@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import bcrypt
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestrator.core.config import get_settings
@@ -172,6 +172,17 @@ class APIKeyService:
         )
         result = await db.execute(stmt)
         return result.rowcount > 0
+
+    async def count_active(self, db: AsyncSession) -> int:
+        """Nombre de clés actives — sert au bootstrap de la première clé."""
+        stmt = (
+            select(func.count())
+            .select_from(APIKey)
+            .where(APIKey.is_active.is_(True))
+            .where(APIKey.revoked_at.is_(None))
+        )
+        result = await db.execute(stmt)
+        return int(result.scalar() or 0)
 
     async def list_active(self, db: AsyncSession) -> list[dict]:
         stmt = (
