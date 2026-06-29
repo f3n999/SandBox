@@ -4,6 +4,34 @@ name: mailguardianx
 #  MailGuardianX — Stack complet
 #  Réseaux séparés : "internal" pour les services backend
 #                    "cape_isolated" sans Internet pour CAPE
+#
+#  Deux topologies de déploiement, au choix :
+#
+#  A) Un seul serveur — par défaut.
+#     `docker compose --profile sandbox up -d`
+#     CAPE, MongoDB et INetSim tournent comme conteneurs ici.
+#     Demande un hôte qui supporte la virtualisation imbriquée
+#     (CAPE détonne des VM Windows à l'intérieur du conteneur CAPE).
+#
+#  B) Deux machines — recommandé en production, c'est ce qui a
+#     été démontré et validé pour ce projet.
+#     `docker compose up -d` (sans --profile sandbox) sur la
+#     machine orchestrateur ; cape/mongodb/inetsim ne démarrent
+#     pas ici. CAPE tourne en installation native (pas Docker —
+#     l'isolation KVM est plus fiable hors conteneur) sur une
+#     deuxième machine dédiée. Pointer CAPE_API_URL vers son IP
+#     dans `.env`. Voir GUIDE-DEPLOIEMENT.md, section
+#     "Topologie B — deux machines".
+#
+#     Raison du choix B en pratique : héberger CAPE demande de la
+#     virtualisation imbriquée (l'hôte doit exposer VT-x/AMD-V à
+#     la VM ou au conteneur), ce que tous les environnements ne
+#     supportent pas par défaut (notamment sur un hyperviseur de
+#     type ESXi, où l'option doit être activée explicitement par
+#     VM). Séparer la détonation sur sa propre machine évite aussi
+#     que la sandbox — qui exécute volontairement du code
+#     potentiellement malveillant — partage un réseau ou un compte
+#     avec les services qui traitent les vraies données du pipeline.
 # ════════════════════════════════════════════════════════════
 
 services:
@@ -22,7 +50,11 @@ services:
     environment:
       # URLs Redis lues depuis Docker Secrets à l'intérieur du container (config.py)
       # Ne pas mettre ${REDIS_PASSWORD} ici — le password n'est PAS une env var host
-      CAPE_API_URL: http://cape:8000
+      # Topologie A (un serveur) : laisser la valeur par défaut, qui résout
+      # vers le conteneur cape de cette même stack (profil "sandbox" actif).
+      # Topologie B (deux machines) : surcharger CAPE_API_URL dans .env avec
+      # l'IP de la machine sandbox, ex. CAPE_API_URL=http://192.0.2.10:8000
+      CAPE_API_URL: ${CAPE_API_URL:-http://cape:8000}
       MISP_URL: http://misp:80
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
@@ -80,7 +112,11 @@ services:
     container_name: mgx-celery-worker
     restart: unless-stopped
     environment:
-      CAPE_API_URL: http://cape:8000
+      # Topologie A (un serveur) : laisser la valeur par défaut, qui résout
+      # vers le conteneur cape de cette même stack (profil "sandbox" actif).
+      # Topologie B (deux machines) : surcharger CAPE_API_URL dans .env avec
+      # l'IP de la machine sandbox, ex. CAPE_API_URL=http://192.0.2.10:8000
+      CAPE_API_URL: ${CAPE_API_URL:-http://cape:8000}
       CLAMAV_HOST: clamav
       CLAMAV_PORT: 3310
       YARA_RULES_PATH: /app/yara-rules
@@ -124,7 +160,13 @@ services:
       retries: 3
 
   # ════════════════════ CAPE SANDBOX ═════════════════════════
+  # Profil "sandbox" : ne démarre que via `docker compose --profile
+  # sandbox up -d` (topologie A, un seul serveur). En topologie B
+  # (deux machines, recommandée), ce service reste éteint ici et
+  # CAPE tourne en installation native sur la machine sandbox dédiée
+  # — voir GUIDE-DEPLOIEMENT.md, "Topologie B".
   cape:
+    profiles: ["sandbox"]
     image: kevoreilly/cape2:latest
     container_name: mgx-cape
     restart: unless-stopped
@@ -150,7 +192,9 @@ services:
         condition: service_started
 
   # ════════════════════ INETSIM (simu Internet pour CAPE) ════
+  # Même profil "sandbox" que cape — voir le commentaire ci-dessus.
   inetsim:
+    profiles: ["sandbox"]
     image: catatonicprime/inetsim:latest
     container_name: mgx-inetsim
     restart: unless-stopped
@@ -242,7 +286,9 @@ services:
       retries: 5
 
   # ════════════════════ MONGODB (pour CAPE) ══════════════════
+  # Même profil "sandbox" que cape — voir le commentaire ci-dessus.
   mongodb:
+    profiles: ["sandbox"]
     image: mongo:7
     container_name: mgx-mongodb
     restart: unless-stopped

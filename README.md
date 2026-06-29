@@ -75,7 +75,16 @@ Prometheus → Grafana (dashboard SOC)
 | 3 | **YARA** | < 100ms | 7+ règles ransomware (CryptoAPI, shadow copies, dropper macro/LNK…) |
 | 4 | **ClamAV** | < 500ms | Signatures connues (main.cvd + daily.cvd) |
 | 5 | **MISP** | < 1s | Threat intel — IOCs, campagnes, tags |
-| 6 | **CAPE** | 2-10min | Analyse dynamique en VM Windows isolée (réseau `internal: true` + INetSim) |
+| 6 | **CAPE** | 2-10min | Analyse dynamique en VM Windows isolée, réseau coupé d'Internet (INetSim) |
+
+### Deux topologies de déploiement
+
+CAPE peut tourner de deux façons, au choix :
+
+- **Un seul serveur** — CAPE en conteneur Docker (`internal: true` + INetSim), profil `sandbox` du compose. Demande un hôte qui expose la virtualisation imbriquée au conteneur.
+- **Deux machines** — l'orchestrateur d'un côté, une sandbox CAPE dédiée de l'autre (installation native, pas de conteneur). C'est la configuration recommandée et celle qui a été déployée pour ce projet : elle évite la dépendance à la virtualisation imbriquée sur la machine orchestrateur, et isole la détonation — qui exécute volontairement du code potentiellement malveillant — sur sa propre machine.
+
+Détail des deux options : [GUIDE-DEPLOIEMENT.md](GUIDE-DEPLOIEMENT.md#choisir-sa-topologie).
 
 ---
 
@@ -90,7 +99,7 @@ Prometheus → Grafana (dashboard SOC)
 | YARA (yara-python) | Détection par patterns |
 | ClamAV (clamd) | AV signatures |
 | MISP | Threat intelligence |
-| CAPE Sandbox v2 | Analyse comportementale dynamique |
+| CAPE Sandbox v2 | Analyse comportementale dynamique (conteneur en un seul serveur, installation native sur machine dédiée en déploiement deux machines) |
 | Azure Identity + Microsoft Graph SDK | Auth app-only sur tenant M365 |
 | APScheduler | Scans automatiques |
 | Prometheus + Grafana | Observabilité |
@@ -125,8 +134,11 @@ nano secrets/azure_client_secret.txt
 cp .env.example .env
 nano .env   # activer SCHEDULE_ENABLED=true
 
-# Démarrer la stack complète
-docker compose up -d
+# Démarrer la stack — un seul serveur (CAPE en conteneur) :
+docker compose --profile sandbox up -d
+# ou, en déploiement deux machines (recommandé, voir GUIDE-DEPLOIEMENT.md) :
+#   définir CAPE_API_URL dans .env vers l'IP de la machine sandbox, puis :
+# docker compose up -d
 
 # Appliquer les migrations DB
 docker compose exec orchestrator alembic upgrade head
@@ -136,7 +148,7 @@ curl -X POST http://localhost:8000/api/v1/admin/keys \
      -F "name=bootstrap" -F "scopes=analyze,upload,admin"
 ```
 
-Voir [GUIDE-DEPLOIEMENT.md](GUIDE-DEPLOIEMENT.md) pour la procédure complète, y compris la récupération des tokens MISP/CAPE après premier boot.
+Voir [GUIDE-DEPLOIEMENT.md](GUIDE-DEPLOIEMENT.md) pour la procédure complète : les deux topologies de déploiement, la sandbox CAPE dédiée pas à pas, et la récupération des tokens MISP/CAPE après premier boot.
 
 ---
 
@@ -221,7 +233,7 @@ Documentation interactive : `https://serveur:8000/docs` (Swagger UI).
 | Suppression après analyse | Fichiers envoyés à CAPE supprimés après verdict (TTL configurable) |
 | Restriction d'accès | API keys bcrypt + scopes vérifiés + rate limiting par source |
 | Traçabilité | `scan_sessions` + `email_analyses` en PostgreSQL avec timestamps |
-| Réseau isolé | CAPE tourne sur `internal: true` (INetSim simule Internet) |
+| Réseau isolé | CAPE n'a jamais accès au vrai Internet (INetSim simule les réponses) ; en déploiement deux machines, la détonation tourne sur une machine séparée de l'orchestrateur |
 | Secrets | Docker Secrets uniquement (pas d'env vars sensibles, pas de fichiers committés) |
 
 ---
