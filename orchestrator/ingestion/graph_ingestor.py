@@ -276,6 +276,20 @@ class GraphIngestor:
         # Persistance PostgreSQL — audit RGPD + alimentation /stats + Grafana
         await self._persist_analysis(user, msg, attachment_metas, response, request.email, session_id)
 
+        # Action post-verdict : déplacer vers Junk si BLOCK
+        if response.overall_verdict.value == "block":
+            moved = await self.graph.move_to_junk(user.id, msg.id)
+            if moved:
+                logger.info(
+                    "[%s] BLOCK — message %s déplacé vers Junk",
+                    mailbox, msg.subject[:50],
+                )
+            else:
+                logger.warning(
+                    "[%s] BLOCK — move_to_junk échoué (Mail.ReadWrite manquant ?)",
+                    mailbox,
+                )
+
         if stats:
             stats.record_verdict(response)
         return response

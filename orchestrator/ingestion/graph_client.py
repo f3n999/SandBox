@@ -280,6 +280,33 @@ class GraphClient:
             dmarc_result=dmarc,
         )
 
+    # ────────── Actions ──────────
+
+    async def move_to_junk(self, user_id: str, message_id: str) -> bool:
+        """
+        Déplace un message vers le dossier Junk Email de l'utilisateur.
+        Requiert Mail.ReadWrite (application permission + admin consent).
+        """
+        try:
+            headers = await self._headers()
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.post(
+                    f"{GRAPH_BASE}/users/{user_id}/messages/{message_id}/move",
+                    json={"destinationId": "junkemail"},
+                    headers=headers,
+                )
+            if response.status_code == 201:
+                logger.info("Message %s déplacé vers Junk pour %s", message_id[:20], user_id)
+                return True
+            logger.warning(
+                "move_to_junk échoué pour %s: HTTP %d — %s",
+                user_id, response.status_code, response.text[:200],
+            )
+            return False
+        except Exception as exc:
+            logger.error("move_to_junk exception: %s", exc)
+            return False
+
     # ────────── Attachments ──────────
 
     async def list_attachments(
