@@ -19,6 +19,7 @@ from celery import Task
 
 from orchestrator.celery_app import celery_app
 from orchestrator.core.config import get_settings
+from orchestrator.core.filetype import is_detonable, static_type_score, compute_imphash
 from orchestrator.services.cache import CacheService
 from orchestrator.services.cape_client import CAPEClient
 from orchestrator.services.clamav_client import ClamAVClient
@@ -113,52 +114,88 @@ def analyze_attachment_task(
 async def _run_async(
     task: CapeTask, sha256: str, filename: str, content: bytes
 ) -> dict:
-    """Exécution async (réutilise les clients du worker)."""
-    await task.cache.connect()
+    """Pipeline worker avec gating CAPE.
 
-    # 1) YARA
+    Ordre : dédup exacte → YARA → ClamAV → score statique → gate zone-grise
+            → pré-filtre type → dédup floue → CAPE.
+    CAPE n'est appelé QUE pour la zone grise + type détonable + jamais vu.
+    """
+    await task.cache.connect()
+    s = get_settings()
+
+    # ── 0) DÉDUP EXACTE (SHA256) — déjà analysé → 0 détonation ─────────────
+    cached = await task.cache.get_hash_verdict(sha256)
+    if cached:
+        return _from_cache(sha256, cached, source="cache")
+
+    # ── 1) YARA — block direct si forte confiance ──────────────────────────
+    yara_score = 0.0
+    yara_threat: Optional[str] = None
+    yara_rules: list[str] = []
     if task.yara.enabled and task.yara.health_check():
         y = await task.yara.scan_bytes(content)
-        if y.matched and y.score >= 0.90:
-            verdict = Verdict.BLOCK
-            await task.cache.set_hash_verdict(
-                sha256, verdict,
-                threat_name=y.threat_name, confidence=y.score,
-                source="yara", ttl=86400 * 7,
-            )
-            return {
-                "sha256": sha256, "verdict": verdict.value,
-                "confidence": y.score, "threat_name": y.threat_name,
-                "signatures": y.rule_names, "source": "yara",
-            }
+        if y.matched:
+            yara_score, yara_threat, yara_rules = y.score, y.threat_name, y.rule_names
+            if y.score >= 0.90:
+                return await _block(
+                    task, sha256, y.threat_name, y.score,
+                    [f"yara:{r}" for r in y.rule_names], "yara",
+                )
 
-    # 2) ClamAV
+    # ── 2) ClamAV — block direct si infecté ────────────────────────────────
     if task.clamav.enabled:
         c = await task.clamav.scan_bytes(content)
         if c.infected:
-            verdict = Verdict.BLOCK
-            await task.cache.set_hash_verdict(
-                sha256, verdict,
-                threat_name=f"ClamAV/{c.signature}", confidence=1.0,
-                source="clamav", ttl=86400 * 7,
+            return await _block(
+                task, sha256, f"ClamAV/{c.signature}", 1.0,
+                [f"clamav:{c.signature}"], "clamav",
             )
-            return {
-                "sha256": sha256, "verdict": verdict.value,
-                "confidence": 1.0, "threat_name": f"ClamAV/{c.signature}",
-                "signatures": [f"clamav:{c.signature}"], "source": "clamav",
-            }
 
-    # 3) CAPE Sandbox
+    # ── 3) SCORE STATIQUE COMBINÉ ──────────────────────────────────────────
+    combined = max(yara_score, static_type_score(filename, content))
+
+    # ── 4) GATE ZONE-GRISE — on ne détone QUE l'incertain ──────────────────
+    if combined <= s.score_threshold_allow:               # ≤0.3 → propre
+        return await _finalize(task, sha256, Verdict.ALLOW, combined, None, [], "static")
+    if combined >= s.score_threshold_block:               # ≥0.8 → bloqué (ex. via MISP)
+        return await _block(
+            task, sha256, yara_threat or "static/high-risk", combined,
+            [f"yara:{r}" for r in yara_rules], "static",
+        )
+
+    # ── 5) PRÉ-FILTRE TYPE — un fichier inerte ne se détone pas ────────────
+    if not is_detonable(filename, content):
+        # Zone grise MAIS pas de contenu actif → verdict prudent, sans CAPE.
+        verdict = Verdict.SUSPECT if combined >= s.score_threshold_suspect else Verdict.ALLOW
+        return await _finalize(task, sha256, verdict, combined, None, [], "static-inert")
+
+    # ── 6) DÉDUP FLOUE (imphash) — variante déjà détonée → réutilise ───────
+    imphash = compute_imphash(content)
+    if imphash:
+        fuzzy = await task.cache.get_hash_verdict(f"imp:{imphash}")
+        if fuzzy:
+            return _from_cache(sha256, fuzzy, source="fuzzy-cache")
+
+    # ── 7) CAPE — la minorité : zone grise + type détonable + jamais vu ────
     result = await task.cape.analyze_and_verdict(content, filename)
     verdict_obj = result.get("verdict", Verdict.ERROR)
     if not isinstance(verdict_obj, Verdict):
         verdict_obj = Verdict(verdict_obj)
+
     await task.cache.set_hash_verdict(
         sha256, verdict_obj,
         threat_name=result.get("threat_name"),
         confidence=result.get("confidence", 0.0),
         source="cape", ttl=86400 * 7,
     )
+    if imphash:  # mémorise le verdict pour les futures variantes proches
+        await task.cache.set_hash_verdict(
+            f"imp:{imphash}", verdict_obj,
+            threat_name=result.get("threat_name"),
+            confidence=result.get("confidence", 0.0),
+            source="cape", ttl=86400 * 7,
+        )
+
     return {
         "sha256": sha256,
         "verdict": verdict_obj.value,
@@ -168,4 +205,48 @@ async def _run_async(
         "signatures": result.get("signatures_matched", []),
         "cape_task_id": result.get("cape_task_id"),
         "source": "cape",
+    }
+
+
+# ──────────────────── Helpers de gating ────────────────────
+
+async def _block(
+    task: CapeTask, sha256: str, threat: Optional[str], conf: float,
+    sigs: list[str], source: str,
+) -> dict:
+    """Verdict BLOCK : met en cache et retourne le dict sérialisable."""
+    await task.cache.set_hash_verdict(
+        sha256, Verdict.BLOCK, threat_name=threat, confidence=conf,
+        source=source, ttl=86400 * 7,
+    )
+    return {
+        "sha256": sha256, "verdict": Verdict.BLOCK.value, "confidence": conf,
+        "threat_name": threat, "signatures": sigs, "source": source,
+    }
+
+
+async def _finalize(
+    task: CapeTask, sha256: str, verdict: Verdict, conf: float,
+    threat: Optional[str], sigs: list[str], source: str,
+) -> dict:
+    """Verdict non-bloquant tranché sans CAPE (ALLOW / SUSPECT)."""
+    await task.cache.set_hash_verdict(
+        sha256, verdict, threat_name=threat, confidence=conf,
+        source=source, ttl=86400 * 7,
+    )
+    return {
+        "sha256": sha256, "verdict": verdict.value, "confidence": conf,
+        "threat_name": threat, "signatures": sigs, "source": source,
+    }
+
+
+def _from_cache(sha256: str, cached: dict, source: str) -> dict:
+    """Reconstruit un dict de réponse depuis un hit cache (exact ou flou)."""
+    return {
+        "sha256": sha256,
+        "verdict": cached.get("verdict", Verdict.ERROR.value),
+        "confidence": cached.get("confidence", 0.0),
+        "threat_name": cached.get("threat_name"),
+        "signatures": [],
+        "source": source,
     }
