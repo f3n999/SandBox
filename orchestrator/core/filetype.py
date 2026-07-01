@@ -22,6 +22,8 @@ DETONABLE_EXT = {
     ".exe", ".dll", ".scr", ".com", ".js", ".jse", ".vbs", ".vbe",
     ".ps1", ".bat", ".cmd", ".hta", ".wsf", ".lnk", ".iso", ".img",
     ".docm", ".xlsm", ".pptm", ".zip", ".rar", ".7z", ".cab", ".ace", ".jar",
+    # .xls always detonable — XLM (Excel 4) macros are undetectable statically
+    ".xls",
 }
 LEGACY_OFFICE = {".doc", ".xls", ".ppt"}
 OOXML_OFFICE = {".docx", ".xlsx", ".pptx"}

@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import html as _html
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -296,8 +298,12 @@ class GraphClient:
         Le mail reste en boîte de réception — l'utilisateur voit l'alerte en ouvrant le mail.
         Requiert Mail.ReadWrite (application permission + admin consent).
         """
+        safe_sender = _html.escape(sender_address or "inconnu")
+        safe_filename = _html.escape(filename or "inconnu")
+        safe_threat = _html.escape(threat_name or "Fichier à haut risque")
+
         banner_html = f"""
-<div style="font-family:Arial,sans-serif;border:3px solid #d32f2f;border-radius:6px;padding:16px 20px;margin-bottom:20px;background:#fff3f3">
+<div data-mgx-banner="1" style="font-family:Arial,sans-serif;border:3px solid #d32f2f;border-radius:6px;padding:16px 20px;margin-bottom:20px;background:#fff3f3">
   <p style="margin:0 0 8px 0;font-size:16px;font-weight:bold;color:#d32f2f">
     ⚠️ AVERTISSEMENT SÉCURITÉ — MailGuardianX
   </p>
@@ -307,15 +313,15 @@ class GraphClient:
   <table style="border-collapse:collapse;width:100%;font-size:13px">
     <tr style="background:#fce8e8">
       <td style="padding:6px 10px;font-weight:bold;width:38%;color:#555">Expéditeur suspect</td>
-      <td style="padding:6px 10px;color:#333">{sender_address}</td>
+      <td style="padding:6px 10px;color:#333">{safe_sender}</td>
     </tr>
     <tr>
       <td style="padding:6px 10px;font-weight:bold;color:#555">Pièce jointe bloquée</td>
-      <td style="padding:6px 10px;color:#d32f2f;font-weight:bold">{filename}</td>
+      <td style="padding:6px 10px;color:#d32f2f;font-weight:bold">{safe_filename}</td>
     </tr>
     <tr style="background:#fce8e8">
       <td style="padding:6px 10px;font-weight:bold;color:#555">Menace détectée</td>
-      <td style="padding:6px 10px;color:#333">{threat_name or "Fichier à haut risque"}</td>
+      <td style="padding:6px 10px;color:#333">{safe_threat}</td>
     </tr>
   </table>
   <p style="margin:12px 0 0 0;font-size:13px;color:#b71c1c;font-weight:bold">
@@ -345,14 +351,21 @@ class GraphClient:
             original_content = msg_data.get("body", {}).get("content", "")
             content_type = msg_data.get("body", {}).get("contentType", "text")
 
+            # Idempotency — skip if our banner is already present
+            if 'data-mgx-banner="1"' in original_content:
+                logger.info(
+                    "prepend_warning_banner: bannière déjà présente — skip (msg %s)",
+                    message_id[:20],
+                )
+                return True
+
             # 2) Construire le nouveau body (bannière + contenu original)
             if content_type.lower() == "html":
                 # Insérer la bannière après <body> si présent, sinon en tête
                 if "<body" in original_content.lower():
-                    import re
                     new_content = re.sub(
                         r"(<body[^>]*>)",
-                        r"\1" + banner_html,
+                        lambda m: m.group(0) + banner_html,
                         original_content,
                         count=1,
                         flags=re.IGNORECASE,

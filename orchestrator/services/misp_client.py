@@ -144,6 +144,51 @@ class MISPClient:
             logger.error(f"MISP domain search error: {e}")
             return {"found": False, "malicious_domain": False}
 
+
+    async def create_event(self, sha256: str, threat_name: Optional[str], source: str) -> bool:
+        """Publie un IOC détecté par MailGuardianX dans MISP sur verdict BLOCK."""
+        try:
+            payload = {
+                "Event": {
+                    "info": f"MailGuardianX BLOCK — {threat_name or 'Unknown'} [{source}]",
+                    "threat_level_id": "1",
+                    "analysis": "2",
+                    "distribution": "0",
+                    "Attribute": [{
+                        "type": "sha256",
+                        "category": "Payload delivery",
+                        "value": sha256,
+                        "to_ids": True,
+                        "comment": f"Detected by MailGuardianX via {source}",
+                    }],
+                    "Tag": [
+                        {"name": "tlp:red"},
+                        {"name": "mailguardianx:detected"},
+                        # sanitize source — MISP rejects tag names containing ':'
+                        {"name": f"mailguardianx:source={source.replace(':', '-')}"},
+                    ],
+                }
+            }
+            async with httpx.AsyncClient(timeout=10, verify=self.verify_ssl) as client:
+                response = await client.post(
+                    f"{self.misp_url}/events",
+                    json=payload,
+                    headers=self._headers,
+                )
+                # read inside context so response body is fully available
+                if response.status_code in (200, 201):
+                    try:
+                        event_id = response.json().get("Event", {}).get("id")
+                    except Exception:
+                        event_id = None
+                    logger.info(f"MISP event created: id={event_id} sha256={sha256[:16]}...")
+                    return True
+                logger.warning(f"MISP create_event failed: HTTP {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"MISP create_event error: {e}")
+            return False
+
     async def health_check(self) -> bool:
         """Vérifie que MISP est accessible."""
         try:

@@ -345,6 +345,7 @@ class OrchestratorService:
                     sha256, Verdict.BLOCK,
                     threat_name=y.threat_name, confidence=y.score, source="yara",
                 )
+                await self.misp.create_event(sha256, y.threat_name, "yara")
                 return AttachmentVerdict(
                     sha256=sha256, verdict=Verdict.BLOCK, confidence=y.score,
                     threat_name=y.threat_name, signatures_matched=y.rule_names,
@@ -353,13 +354,15 @@ class OrchestratorService:
         if self.clamav and self.clamav.enabled:
             c = await self.clamav.scan_bytes(file_data)
             if c.infected:
+                clamav_threat = f"ClamAV/{c.signature}"
                 await self.cache.set_hash_verdict(
                     sha256, Verdict.BLOCK,
-                    threat_name=f"ClamAV/{c.signature}", confidence=1.0, source="clamav",
+                    threat_name=clamav_threat, confidence=1.0, source="clamav",
                 )
+                await self.misp.create_event(sha256, clamav_threat, "clamav")
                 return AttachmentVerdict(
                     sha256=sha256, verdict=Verdict.BLOCK, confidence=1.0,
-                    threat_name=f"ClamAV/{c.signature}",
+                    threat_name=clamav_threat,
                     signatures_matched=[f"clamav:{c.signature}"],
                     analysis_source="clamav", clamav_signature=c.signature,
                 )
@@ -369,15 +372,18 @@ class OrchestratorService:
         verdict = result.get("verdict", Verdict.ERROR)
         if isinstance(verdict, str):
             verdict = Verdict(verdict)
+        cape_threat = result.get("threat_name")
         await self.cache.set_hash_verdict(
-            sha256, verdict, threat_name=result.get("threat_name"),
+            sha256, verdict, threat_name=cape_threat,
             confidence=result.get("confidence", 0.0), source="cape", ttl=86400 * 7,
         )
+        if verdict == Verdict.BLOCK:
+            await self.misp.create_event(sha256, cape_threat, "cape")
         return AttachmentVerdict(
             sha256=sha256,
             verdict=verdict,
             confidence=result.get("confidence", 0.0),
-            threat_name=result.get("threat_name"),
+            threat_name=cape_threat,
             signatures_matched=result.get("signatures_matched", []),
             analysis_source="cape",
             cape_score=result.get("cape_score", 0.0),
@@ -417,6 +423,14 @@ class OrchestratorService:
             source=source,
             ttl=ttl,
         )
+
+        if verdict == Verdict.BLOCK and source != "misp":
+            published = await self.misp.create_event(sha, threat_name, source)
+            if not published:
+                logger.warning(
+                    "MISP feedback loop: create_event failed for sha=%s source=%s",
+                    sha[:16], source,
+                )
 
         return {
             "verdict_obj": AttachmentVerdict(

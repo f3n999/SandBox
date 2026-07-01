@@ -165,7 +165,7 @@ rule MailGuardianX_Simulation_Payload {
     meta:
         description = "Marqueur de simulation MailGuardianX — payload de test contrôlé"
         author = "Oteria B3"
-        severity = "high"
+        severity = "critical"
         category = "test"
 
     strings:

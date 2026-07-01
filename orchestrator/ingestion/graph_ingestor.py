@@ -278,13 +278,21 @@ class GraphIngestor:
 
         # Action post-verdict : bannière d'avertissement dans le mail si BLOCK
         if response.overall_verdict.value == "block":
-            first_att = response.attachments[0] if response.attachments else None
-            first_meta = attachment_metas[0] if attachment_metas else None
+            # Utiliser la PJ qui a déclenché le BLOCK, pas forcément la première
+            blocking_att = next(
+                (a for a in response.attachments if a.verdict.value == "block"),
+                response.attachments[0] if response.attachments else None,
+            )
+            blocking_meta = next(
+                (m for m in attachment_metas
+                 if blocking_att and m.sha256 == blocking_att.sha256),
+                attachment_metas[0] if attachment_metas else None,
+            )
             patched = await self.graph.prepend_warning_banner(
                 user_id=user.id,
                 message_id=msg.id,
-                filename=first_meta.filename if first_meta else "inconnu",
-                threat_name=(first_att.threat_name or "") if first_att else "",
+                filename=blocking_meta.filename if blocking_meta else "inconnu",
+                threat_name=(blocking_att.threat_name or "") if blocking_att else "",
                 sender_address=msg.sender_address or "inconnu",
             )
             if patched:
