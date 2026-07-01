@@ -62,6 +62,7 @@ class GraphScheduler:
             max_instances=1,           # Pas deux runs en parallèle
             coalesce=True,             # Fusionne les triggers en retard
             misfire_grace_time=300,
+            next_run_time=datetime.now(timezone.utc),  # premier scan immédiat au démarrage
         )
         self._scheduler.start()
         self._running = True
