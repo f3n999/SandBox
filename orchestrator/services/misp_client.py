@@ -145,7 +145,7 @@ class MISPClient:
             return {"found": False, "malicious_domain": False}
 
 
-    async def create_event(self, sha256: str, threat_name, source: str) -> bool:
+    async def create_event(self, sha256: str, threat_name: Optional[str], source: str) -> bool:
         """Publie un IOC détecté par MailGuardianX dans MISP sur verdict BLOCK."""
         try:
             payload = {
@@ -164,7 +164,8 @@ class MISPClient:
                     "Tag": [
                         {"name": "tlp:red"},
                         {"name": "mailguardianx:detected"},
-                        {"name": f"mailguardianx:source={source}"},
+                        # sanitize source — MISP rejects tag names containing ':'
+                        {"name": f"mailguardianx:source={source.replace(':', '-')}"},
                     ],
                 }
             }
@@ -174,12 +175,16 @@ class MISPClient:
                     json=payload,
                     headers=self._headers,
                 )
-            if response.status_code in (200, 201):
-                event_id = response.json().get("Event", {}).get("id")
-                logger.info(f"MISP event created: id={event_id} sha256={sha256[:16]}...")
-                return True
-            logger.warning(f"MISP create_event failed: HTTP {response.status_code}")
-            return False
+                # read inside context so response body is fully available
+                if response.status_code in (200, 201):
+                    try:
+                        event_id = response.json().get("Event", {}).get("id")
+                    except Exception:
+                        event_id = None
+                    logger.info(f"MISP event created: id={event_id} sha256={sha256[:16]}...")
+                    return True
+                logger.warning(f"MISP create_event failed: HTTP {response.status_code}")
+                return False
         except Exception as e:
             logger.error(f"MISP create_event error: {e}")
             return False
