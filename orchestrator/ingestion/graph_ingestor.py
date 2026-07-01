@@ -305,6 +305,7 @@ class GraphIngestor:
                     "[%s] BLOCK — prepend_warning_banner échoué (Mail.ReadWrite manquant ?)",
                     mailbox,
                 )
+            await self.graph.tag_message(user_id=user.id, message_id=msg.id, verdict="block")
 
         if stats:
             stats.record_verdict(response)

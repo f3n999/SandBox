@@ -403,6 +403,35 @@ class GraphClient:
             logger.error("prepend_warning_banner exception: %s", exc)
             return False
 
+    async def tag_message(
+        self,
+        user_id: str,
+        message_id: str,
+        verdict: str,
+    ) -> bool:
+        """Ajoute une catégorie Outlook colorée + drapeau de suivi sur le message."""
+        try:
+            headers = await self._headers()
+            category = "🔴 MGX-BLOQUÉ" if verdict == "block" else "🟡 MGX-SUSPECT"
+            payload: dict = {
+                "categories": [category],
+                "flag": {"flagStatus": "flagged"},
+            }
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.patch(
+                    f"{GRAPH_BASE}/users/{user_id}/messages/{message_id}",
+                    json=payload,
+                    headers={**headers, "Content-Type": "application/json"},
+                )
+            if r.status_code == 200:
+                logger.info("Étiquette '%s' ajoutée msg %s", category, message_id[:20])
+                return True
+            logger.warning("tag_message PATCH échoué HTTP %d msg %s", r.status_code, message_id[:20])
+            return False
+        except Exception as exc:
+            logger.error("tag_message exception: %s", exc)
+            return False
+
     # ────────── Attachments ──────────
 
     async def list_attachments(
