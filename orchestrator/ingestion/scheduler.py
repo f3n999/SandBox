@@ -49,10 +49,46 @@ class GraphScheduler:
         self.differential = differential
         self._scheduler = AsyncIOScheduler(timezone="UTC")
         self._running = False
+        self._is_leader = False
+        self._leader_lock_key = f"mgx:scheduler:leader:{tenant_id}"
 
-    def start(self) -> None:
+    async def try_start(self) -> bool:
+        """
+        Démarre le scheduler UNIQUEMENT si ce process obtient le verrou
+        Redis de leader.
+
+        L'orchestrateur tourne avec plusieurs process (Dockerfile :
+        `uvicorn --workers 4`). `lifespan()` s'exécute dans CHAQUE process
+        — sans ce verrou, 4 schedulers indépendants démarraient et
+        scanneraient le même tenant en parallèle, soumettant chaque pièce
+        jointe 4x à CAPE (bug réel observé : ~31% des verdicts en TIMEOUT,
+        la VM de détonation ne pouvant traiter qu'une tâche à la fois).
+
+        Le verrou est renouvelé à chaque scan (`_run_scan`) avec une TTL
+        plus longue que l'intervalle : si ce process meurt, le verrou
+        expire et le scheduler reste simplement arrêté jusqu'au prochain
+        redémarrage du conteneur (pas de reprise automatique par un autre
+        worker — acceptable ici, largement préférable au bug de duplication).
+
+        Retourne True si CE process pilote effectivement le scheduler.
+        """
         if self._running:
-            return
+            return True
+        lock_ttl = self.interval_minutes * 60 + 120  # marge de survie entre 2 scans
+        acquired = await self.orchestrator.cache.try_acquire_lock(
+            self._leader_lock_key, ttl=lock_ttl,
+        )
+        if not acquired:
+            logger.info(
+                "Scheduler déjà piloté par un autre process (verrou %s) — "
+                "ce worker reste passif.", self._leader_lock_key,
+            )
+            return False
+        self._is_leader = True
+        self._start_internal()
+        return True
+
+    def _start_internal(self) -> None:
         self._scheduler.add_job(
             self._run_scan,
             trigger=IntervalTrigger(minutes=self.interval_minutes),
@@ -82,6 +118,12 @@ class GraphScheduler:
     async def _run_scan(self) -> None:
         """Exécute un scan complet — appelé par APScheduler."""
         logger.info("=== Graph scan démarré (tenant=%s) ===", self.tenant_id)
+
+        # Prolonge le verrou de leader — tant que ce process tourne et
+        # scanne effectivement, personne d'autre ne doit pouvoir démarrer
+        # un second scheduler concurrent pour ce tenant.
+        lock_ttl = self.interval_minutes * 60 + 120
+        await self.orchestrator.cache.renew_lock(self._leader_lock_key, ttl=lock_ttl)
 
         since = await self._compute_since() if self.differential else None
 

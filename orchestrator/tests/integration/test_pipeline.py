@@ -104,6 +104,53 @@ class TestPipelineCascade:
         assert response.requires_file_upload is True
         assert response.attachments[0].verdict == Verdict.REQUEST_DEEP_ANALYSIS
 
+    async def test_score_exactly_on_allow_boundary_does_not_allow(
+        self, orchestrator, make_request, make_attachment
+    ):
+        """
+        Régression : un .exe nu (heuristique=0.60, sender clean, aucune
+        combinaison double-ext/MIME/taille) donne un score total EXACTEMENT
+        égal à threshold_allow (0.60 × 0.50 = 0.30 == 0.3). Avec l'ancien
+        `<=`, ce cas précis passait ALLOW sans jamais toucher CAPE — faille
+        trouvée en revue. Le gate doit être strictement `<`.
+        """
+        request = make_request(
+            attachments=[make_attachment(
+                file_type=FileType.EXE, filename="malware.exe",
+                file_size=50_000,   # au-dessus du seuil "suspicious_size" (20KB)
+            )],
+            sender="user@example.com",   # spf/dkim/dmarc="pass" par défaut → sender_score=0
+        )
+        response = await orchestrator.analyze(request)
+        assert response.overall_verdict != Verdict.ALLOW
+        assert response.attachments[0].verdict == Verdict.REQUEST_DEEP_ANALYSIS
+
+    async def test_cape_submission_skipped_when_already_inflight(
+        self, orchestrator, mock_cache, mock_cape, make_request, make_attachment
+    ):
+        """
+        Si un autre process a déjà le verrou pour ce hash (soumission CAPE
+        en cours ailleurs), on ne resoumet PAS à CAPE — verdict prudent
+        (SUSPECT) sans appeler cape.analyze_and_verdict. C'est le fix direct
+        du bug "même fichier soumis 4x à CAPE en parallèle".
+        """
+        mock_cache.try_acquire_lock = AsyncMock(return_value=False)
+
+        # DOCM seul (sans macro) = 0.75 × poids 0.50 = 0.375 → zone grise
+        # garantie (entre threshold_allow=0.3 et threshold_block=0.8),
+        # atteint donc forcément l'étape CAPE inline.
+        request = make_request(
+            attachments=[make_attachment(
+                file_type=FileType.DOCM, filename="rapport.docm", sha256="f" * 64,
+            )],
+        )
+        bytes_map = {"f" * 64: b"contenu docm de test"}
+        response = await orchestrator.analyze_with_bytes(request, bytes_map)
+
+        mock_cape.analyze_and_verdict.assert_not_awaited()
+        assert response.attachments[0].analysis_source == "cape-inflight-elsewhere"
+        assert response.attachments[0].verdict == Verdict.SUSPECT
+
 
 @pytest.mark.asyncio
 class TestPipelineWithBytes:

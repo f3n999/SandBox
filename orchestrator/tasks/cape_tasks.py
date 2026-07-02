@@ -155,7 +155,9 @@ async def _run_async(
     combined = max(yara_score, static_type_score(filename, content))
 
     # ── 4) GATE ZONE-GRISE — on ne détone QUE l'incertain ──────────────────
-    if combined <= s.score_threshold_allow:               # ≤0.3 → propre
+    # Strictement < (pas <=) : même faille que le chemin sync (orchestrator.py)
+    # — sur la borne exacte, <= laissait passer en ALLOW sans détonation.
+    if combined < s.score_threshold_allow:                 # <0.3 → propre
         return await _finalize(task, sha256, Verdict.ALLOW, combined, None, [], "static")
     if combined >= s.score_threshold_block:               # ≥0.8 → bloqué (ex. via MISP)
         return await _block(
@@ -177,7 +179,26 @@ async def _run_async(
             return _from_cache(sha256, fuzzy, source="fuzzy-cache")
 
     # ── 7) CAPE — la minorité : zone grise + type détonable + jamais vu ────
-    result = await task.cape.analyze_and_verdict(content, filename)
+    # Verrou anti-duplication — même mécanisme que le chemin sync
+    # (orchestrator.py). NE PAS passer par _finalize ici : ça cacherait le
+    # verdict "prudent" avec un TTL de 7 jours et empêcherait le VRAI
+    # verdict du gagnant d'être vu par les analyses suivantes de ce hash.
+    claimed = await task.cache.try_acquire_lock(
+        f"cape:inflight:{sha256}", ttl=s.cape_timeout + 60,
+    )
+    if not claimed:
+        logger.info(
+            "CAPE déjà en cours ailleurs pour %s… — skip soumission dupliquée",
+            sha256[:12],
+        )
+        return {
+            "sha256": sha256, "verdict": Verdict.SUSPECT.value, "confidence": combined,
+            "threat_name": None, "signatures": [], "source": "cape-inflight-elsewhere",
+        }
+
+    result = await task.cape.analyze_and_verdict(
+        content, filename, max_wait=s.cape_timeout,
+    )
     verdict_obj = result.get("verdict", Verdict.ERROR)
     if not isinstance(verdict_obj, Verdict):
         verdict_obj = Verdict(verdict_obj)

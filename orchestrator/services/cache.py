@@ -154,6 +154,36 @@ class CacheService:
         except Exception as e:
             logger.error(f"Redis update_sender error: {e}")
 
+    # ──────────────────── Verrous distribués ────────────────────
+    #
+    # Sert à deux choses :
+    #  - élire un seul worker pour piloter le scheduler (voir
+    #    ingestion/scheduler.py) quand l'orchestrateur tourne avec
+    #    plusieurs process (Dockerfile: uvicorn --workers 4) ;
+    #  - empêcher que plusieurs process soumettent le même hash à CAPE
+    #    en même temps (voir services/orchestrator.py, tasks/cape_tasks.py).
+    #
+    # SET NX EX est atomique côté Redis : un seul appelant reçoit True
+    # même si N process l'appellent au même instant.
+
+    async def try_acquire_lock(self, key: str, ttl: int) -> bool:
+        """Tente de poser un verrou. True si CE process l'a obtenu."""
+        try:
+            acquired = await self._redis.set(key, "1", nx=True, ex=ttl)
+            return bool(acquired)
+        except Exception as e:
+            logger.error(f"Redis try_acquire_lock error: {e}")
+            # Fail-open : un souci Redis ne doit pas bloquer l'analyse/le
+            # scan (au pire un doublon rare, pas un blocage du pipeline).
+            return True
+
+    async def renew_lock(self, key: str, ttl: int) -> None:
+        """Prolonge un verrou déjà détenu (no-op silencieux si perdu/expiré)."""
+        try:
+            await self._redis.expire(key, ttl)
+        except Exception as e:
+            logger.error(f"Redis renew_lock error: {e}")
+
     # ──────────────────── Health ────────────────────
 
     async def health_check(self) -> bool:

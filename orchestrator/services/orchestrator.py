@@ -68,6 +68,7 @@ class OrchestratorService:
         score_threshold_allow: float = 0.3,
         score_threshold_suspect: float = 0.6,
         score_threshold_block: float = 0.8,
+        cape_timeout: int = 600,
     ):
         self.cache = cache
         self.heuristic = heuristic
@@ -78,6 +79,10 @@ class OrchestratorService:
         self.threshold_allow = score_threshold_allow
         self.threshold_suspect = score_threshold_suspect
         self.threshold_block = score_threshold_block
+        # CAPE_TIMEOUT était déclaré en config mais jamais lu — la durée
+        # d'attente réelle retombait toujours sur le défaut hardcodé de
+        # cape_client.py (600s), ignorant la valeur configurée.
+        self.cape_max_wait = cape_timeout
 
     # ════════════════════════════════════════════════════════════
     #  Entrée publique : metadata-only (hash seul — /api/v1/analyze)
@@ -282,7 +287,12 @@ class OrchestratorService:
                 cape_task_id=cape_task_id,
             )
 
-        if combined <= self.threshold_allow:
+        # Strictement < (pas <=) : un score EXACTEMENT sur la borne ne doit
+        # pas ALLOW sans passage CAPE. Sinon un .exe nu (heuristique 0.60 ×
+        # poids 0.50 = 0.30, sender_score=0) tombe pile sur threshold_allow
+        # et est auto-ALLOW sans jamais être détoné — faille réelle trouvée
+        # en revue (0.30 == 0.3 avec l'ancien `<=`).
+        if combined < self.threshold_allow:
             return await self._finalize(
                 sha, Verdict.ALLOW, risk, signatures, yara_matches, clamav_sig,
                 threat_name=None, source="aggregated", cape_task_id=cape_task_id,
@@ -290,11 +300,44 @@ class OrchestratorService:
 
         # ── 7. CAPE inline (si bytes), sinon demander upload ─
         if content is not None:
+            # Verrou anti-duplication : avec plusieurs process (scheduler
+            # 4x avant fix, ou simplement 2 scans qui se chevauchent),
+            # plusieurs workers pouvaient soumettre le MÊME hash à CAPE en
+            # même temps → la VM de détonation (une seule) se retrouvait
+            # avec 4 tâches pour 1 fichier → timeouts en cascade. Un seul
+            # gagne le verrou et soumet réellement ; les autres reçoivent
+            # un verdict prudent sans hash_verdict caché (le vrai verdict,
+            # une fois posé par le gagnant, sera vu par la prochaine
+            # analyse de ce hash via le cache normal à l'étape 1).
+            claimed = await self.cache.try_acquire_lock(
+                f"cape:inflight:{sha}", ttl=self.cape_max_wait + 60,
+            )
+            if not claimed:
+                logger.info(
+                    "[%s] %s… analyse CAPE déjà en cours ailleurs pour ce "
+                    "hash — verdict prudent sans nouvelle soumission",
+                    task_id, sha[:12],
+                )
+                return {
+                    "verdict_obj": AttachmentVerdict(
+                        sha256=sha,
+                        verdict=Verdict.SUSPECT,
+                        confidence=combined,
+                        signatures_matched=signatures[:30],
+                        analysis_source="cape-inflight-elsewhere",
+                        heuristic_score=risk.heuristic_score,
+                        misp_score=risk.misp_score,
+                    ),
+                    "requires_upload": False,
+                }
+
             logger.info(
                 "[%s] %s… score=%.2f → CAPE Sandbox (inline)",
                 task_id, sha[:12], combined,
             )
-            cape_result = await self.cape.analyze_and_verdict(content, att.filename)
+            cape_result = await self.cape.analyze_and_verdict(
+                content, att.filename, max_wait=self.cape_max_wait,
+            )
             cape_verdict = cape_result.get("verdict", Verdict.SUSPECT)
             if isinstance(cape_verdict, str):
                 cape_verdict = Verdict(cape_verdict)
@@ -367,8 +410,25 @@ class OrchestratorService:
                     analysis_source="clamav", clamav_signature=c.signature,
                 )
 
-        # Sinon CAPE
-        result = await self.cape.analyze_and_verdict(file_data, filename)
+        # Sinon CAPE — même verrou anti-duplication que le chemin inline
+        claimed = await self.cache.try_acquire_lock(
+            f"cape:inflight:{sha256}", ttl=self.cape_max_wait + 60,
+        )
+        if not claimed:
+            logger.info(
+                "[%s] CAPE déjà en cours ailleurs pour %s… — skip soumission dupliquée",
+                task_id, sha256[:12],
+            )
+            return AttachmentVerdict(
+                sha256=sha256,
+                verdict=Verdict.SUSPECT,
+                confidence=0.5,
+                analysis_source="cape-inflight-elsewhere",
+            )
+
+        result = await self.cape.analyze_and_verdict(
+            file_data, filename, max_wait=self.cape_max_wait,
+        )
         verdict = result.get("verdict", Verdict.ERROR)
         if isinstance(verdict, str):
             verdict = Verdict(verdict)

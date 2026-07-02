@@ -126,6 +126,11 @@ def mock_cache():
     cache.update_sender_reputation = AsyncMock()
     cache.check_rate_limit = AsyncMock(return_value=True)
     cache.health_check = AsyncMock(return_value=True)
+    # Verrou acquis par défaut (comportement "je suis seul") — les tests
+    # qui veulent simuler une soumission CAPE concurrente le repassent à
+    # AsyncMock(return_value=False) explicitement.
+    cache.try_acquire_lock = AsyncMock(return_value=True)
+    cache.renew_lock = AsyncMock()
     cache._storage = storage
     return cache
 

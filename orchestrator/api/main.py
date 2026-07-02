@@ -149,6 +149,7 @@ async def lifespan(app: FastAPI):
         score_threshold_allow=settings.score_threshold_allow,
         score_threshold_suspect=settings.score_threshold_suspect,
         score_threshold_block=settings.score_threshold_block,
+        cape_timeout=settings.cape_timeout,
     )
     services.stats = StatsService()
     services.api_keys = APIKeyService()
@@ -170,8 +171,11 @@ async def lifespan(app: FastAPI):
             max_users=settings.schedule.max_users_per_scan,
             differential=settings.schedule.differential,
         )
-        services.scheduler.start()
-        logger.info("✓ Scheduler Graph démarré")
+        became_leader = await services.scheduler.try_start()
+        if became_leader:
+            logger.info("✓ Scheduler Graph démarré (ce process est leader)")
+        else:
+            logger.info("✓ Scheduler Graph : ce process reste passif (leader ailleurs)")
     else:
         logger.info("Scheduler Graph désactivé (SCHEDULE_ENABLED=false ou Azure non configuré)")
 

@@ -184,14 +184,19 @@ class TestGraphIngestor:
         assert email.mailbox_user == "victim@hopital.fr"
         assert email.sender_domain == "evil.ru"
         assert email.reply_to == "attacker@gmail.com"   # Reply-To désormais persisté
-        assert email.overall_verdict == Verdict.BLOCK.value  # .exe → heuristique BLOCK
+        # .exe seul (5000 octets, MIME correcte, pas macro) reste dans la
+        # zone grise heuristique (0.75×0.50 + 0.90×0.20 = 0.555, entre
+        # threshold_allow=0.3 et threshold_block=0.8) → routé vers CAPE.
+        # Le mock CAPE de ce test renvoie SUSPECT par défaut (conftest.py) :
+        # c'est le verdict CAPE qui tranche, pas l'heuristique seule.
+        assert email.overall_verdict == Verdict.SUSPECT.value
 
         v = verdicts[0]
         assert v.email_id == email.id
         assert v.sha256 == hashlib.sha256(content).hexdigest()
         assert v.filename == "facture.exe"
         assert v.file_type == "exe"
-        assert v.verdict == Verdict.BLOCK.value
+        assert v.verdict == Verdict.SUSPECT.value
 
         # Idempotence : id déterministe (tenant + message) + DELETE de dédup
         # AVANT l'insert → un ré-scan chevauchant ne duplique pas la ligne.

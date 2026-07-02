@@ -69,9 +69,13 @@ def _make_request(
 
 class TestAttachmentScoring:
     def test_exe_is_high_risk(self, engine):
+        """.exe seul (sans double-ext/MIME-mismatch) : élevé mais pas
+        auto-BLOCK — doit rester dans la zone grise qui route vers CAPE,
+        pas être bloqué sur la seule extension (voir HIGH_RISK_EXTENSIONS,
+        heuristics.py, et le commentaire qui explique ce choix)."""
         att = _make_attachment(filename="malware.exe", file_type=FileType.EXE)
         result = engine.score_attachment(att)
-        assert result["score"] >= 0.90
+        assert 0.55 <= result["score"] <= 0.70
 
     def test_pdf_is_low_risk(self, engine):
         att = _make_attachment(filename="rapport.pdf", file_type=FileType.PDF)
@@ -84,9 +88,10 @@ class TestAttachmentScoring:
         assert 0.50 <= result["score"] <= 0.90
 
     def test_vbs_is_high_risk(self, engine):
+        """Même principe que test_exe_is_high_risk : zone grise → CAPE."""
         att = _make_attachment(filename="script.vbs", file_type=FileType.VBS)
         result = engine.score_attachment(att)
-        assert result["score"] >= 0.85
+        assert 0.55 <= result["score"] <= 0.70
 
 
 # ──────────────────── Tests Double Extension ────────────────────
